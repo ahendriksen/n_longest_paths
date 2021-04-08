@@ -1,0 +1,130 @@
+use std::cmp::min;
+
+#[derive(Debug, Clone)]
+pub struct Edge {
+    pub from: usize,
+    pub to: usize,
+    pub len: f32,
+}
+
+impl Edge {
+    pub fn new(from:usize, to:usize, len: f32) -> Edge{
+        Edge{ from, to, len}
+    }
+}
+
+pub fn longest_paths_log(edges: &[Edge], num_to_extract: usize) -> Vec<bool> {
+
+    let num_to_extract = min(num_to_extract, edges.len());
+
+    let mut shortened_edges = Vec::from(edges);
+
+    let mut in_shortest_path = vec![false; edges.len()];
+    let total_num_extract = num_to_extract;
+    let mut num_extracted = 0;
+
+    while num_extracted < total_num_extract {
+        let mut num_to_extract = total_num_extract - num_extracted;
+        if num_to_extract > 1000 {
+            num_to_extract = num_to_extract / 2;
+        }
+        let extracted_edges = longest_paths(&shortened_edges, num_to_extract);
+        num_extracted += extracted_edges.iter().map(|&b| if b {1} else {0}).sum::<usize>();
+
+        // Update in_shortest_path
+        let mut i = 0;
+        let mut j = 0;
+        while i < in_shortest_path.len() {
+            if in_shortest_path[i] {
+                i += 1;
+            } else if extracted_edges[j]  {
+                in_shortest_path[i] = true;
+                j += 1;
+                i += 1;
+            } else {
+                i += 1;
+                j += 1;
+            }
+        }
+
+        // Update shortened_edges:
+        shortened_edges = shortened_edges
+            .iter()
+            .zip(extracted_edges.iter())
+            .filter_map(|(e, &extracted)| if extracted{ None } else {Some(e.clone())})
+            .collect();
+    }
+    in_shortest_path
+}
+
+
+pub fn longest_paths(edges: &[Edge], extract_num: usize) -> Vec<bool> {
+    for e in edges.iter(){
+        assert!(e.from < e.to);
+    }
+    assert!(! edges.is_empty());
+
+    // Assert that edges are sorted
+    for i in 1..edges.len(){
+        let e0 = &edges[i - 1];
+        let e1 = &edges[i];
+
+        let e0 = (e0.from, e0.to);
+        let e1 = (e1.from, e1.to);
+
+        assert!(e0 <= e1);
+    }
+
+    let extract_num = min(extract_num, edges.len());
+    let mut num_extracted: usize = 0;
+    let mut in_longest_path = vec![false; edges.len()];
+
+    // n - 1 is the index of the largest node
+    let n: usize = edges.iter().map(|e| e.to).max().unwrap() + 1;
+
+    while num_extracted < extract_num {
+        let mut node_dist: Vec<f32> = vec![0.0; n];
+        let mut node_pred_edge_idx: Vec<Option<usize>> = vec![None; n];
+
+        // Compute node distances
+        for (i, e) in edges.iter().enumerate() {
+            if in_longest_path[i] {
+                continue;
+            }
+            let new_dist = node_dist[e.from] + e.len;
+            if new_dist > node_dist[e.to] {
+                node_dist[e.to] = new_dist;
+                node_pred_edge_idx[e.to] = Some(i);
+            }
+        }
+        // Compute argmax of node_dist
+        let mut largest_dist = 0.0;
+        let mut largest_node: usize = 0;
+        for (i, dist) in node_dist.iter().enumerate(){
+            if dist > &largest_dist {
+                largest_dist = *dist;
+                largest_node = i;
+            }
+        }
+
+        // Walk backward from largest node to find all edges in longest path:
+        // let mut cur_node = dbg!(largest_node);
+        let mut cur_node = largest_node;
+        loop {
+            if let Some(pred_edge_idx) = node_pred_edge_idx[cur_node] {
+                let pred_edge = &edges[pred_edge_idx];
+                // Indicate that edge was part of longest_path
+                in_longest_path[pred_edge_idx] = true;
+                num_extracted += 1;
+                // dbg!(num_extracted);
+
+                // Walk path:
+                cur_node = pred_edge.from;
+            } else {
+                break
+            }
+        }
+    }
+
+    in_longest_path
+}
