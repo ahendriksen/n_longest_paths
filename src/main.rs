@@ -2,6 +2,7 @@ use n_longest_paths::*;
 use structopt::StructOpt;
 use std::io::Read;
 use npy::NpyData;
+use npy;
 use npy_derive;
 use std::convert::TryInto;
 
@@ -52,6 +53,12 @@ fn main() {
 
 
     let num_to_extract: usize = (args.fraction * (edges.len() as f64)) as usize;
+    println!("Extracting {} edges", num_to_extract);
     let in_longest_path = longest_paths_log(&edges, num_to_extract);
 
+    let output_as_ints = in_longest_path.iter().map(|&b| if b { 1} else {0});
+
+    npy::to_file(args.output_path, output_as_ints).expect("Writing output failed");
+
+    println!("Saving output succeeded")
 }
