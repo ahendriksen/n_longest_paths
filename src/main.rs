@@ -70,7 +70,7 @@ fn main() {
     };
 
     let in_longest_path = match args.faster {
-        false => mark_longest_paths_stepwise(&edges, num_to_extract, norm_group),
+        false => mark_longest_paths(&edges, num_to_extract, norm_group),
         true => mark_longest_paths_faster(&edges, num_to_extract, norm_group),
     };
 

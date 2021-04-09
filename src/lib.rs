@@ -24,60 +24,6 @@ pub enum NormGroup {
 
 use NormGroup::*;
 
-/// Run longest_paths in steps and clean up used edges in between.
-pub fn mark_longest_paths_stepwise(
-    edges: &[Edge],
-    num_to_extract: usize,
-    norm_group: NormGroup,
-) -> Vec<bool> {
-    const MIN_STEP_SIZE: usize = 1000;
-
-    let num_to_extract = min(num_to_extract, edges.len());
-
-    let mut shortened_edges = Vec::from(edges);
-
-    let mut in_shortest_path = vec![false; edges.len()];
-    let total_num_extract = num_to_extract;
-    let mut num_extracted = 0;
-
-    while num_extracted < total_num_extract {
-        let mut num_to_extract = total_num_extract - num_extracted;
-        if MIN_STEP_SIZE < num_to_extract {
-            num_to_extract = num_to_extract / 2;
-        }
-        let extracted_edges: Vec<bool> =
-            mark_longest_paths(&shortened_edges, num_to_extract, norm_group);
-
-        num_extracted += extracted_edges
-            .iter()
-            .map(|&b| if b { 1 } else { 0 })
-            .sum::<usize>();
-
-        // Update in_shortest_path
-        let mut i = 0;
-        let mut j = 0;
-        while i < in_shortest_path.len() {
-            if in_shortest_path[i] {
-                i += 1;
-            } else if extracted_edges[j] {
-                in_shortest_path[i] = true;
-                j += 1;
-                i += 1;
-            } else {
-                i += 1;
-                j += 1;
-            }
-        }
-
-        // Update shortened_edges:
-        shortened_edges = shortened_edges
-            .iter()
-            .zip(extracted_edges.iter())
-            .filter_map(|(e, &extracted)| if extracted { None } else { Some(e.clone()) })
-            .collect();
-    }
-    in_shortest_path
-}
 
 fn is_forward_pointing(edges: &[Edge]) -> bool {
     for e in edges.iter() {
@@ -175,6 +121,7 @@ fn compute_node_distances(
 /// Mark edges that are in a longest_path. Continue until at least `num_to_mark`
 /// edges are marked. Once an edge has been marked, it is ignored for further
 /// computations of longest paths.
+/// This function tries not to be quadratic in the number of edges.
 pub fn mark_longest_paths_faster(
     edges: &[Edge],
     num_to_mark: usize,
@@ -385,13 +332,12 @@ pub fn mark_longest_paths(edges: &[Edge], num_to_mark: usize, norm_group: NormGr
 
         // Walk backward from largest node to find all edges in longest path:
         let mut path_length = 0;
-        for (edge_idx, edge) in iterate_back_from(edges, &node_incoming_edge_idx, largest_node_idx)
+        for (edge_idx, _) in iterate_back_from(edges, &node_incoming_edge_idx, largest_node_idx)
         {
             marked[edge_idx] = true;
-            dbg!(edge);
             path_length += 1;
         }
-        num_marked += dbg!(path_length);
+        num_marked += path_length;
     }
 
     marked
@@ -574,9 +520,7 @@ mod tests {
         }
 
         let a = mark_longest_paths(&edges, 20_000, Additive);
-        let b = mark_longest_paths_stepwise(&edges, 20_000, Additive);
-        let c = mark_longest_paths_faster(&edges, 20_000, Additive);
+        let b = mark_longest_paths_faster(&edges, 20_000, Additive);
         assert_eq!(a, b);
-        assert_eq!(a, c);
     }
 }
