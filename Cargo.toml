@@ -1,7 +1,7 @@
 [package]
 name = "n_longest_paths"
 version = "0.1.0"
-authors = ["Allard Hendriksen <allard@allardhendriksen.nl>"]
+authors = ["Allard Hendriksen <allard.hendriksen@cwi.nl>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -11,3 +11,10 @@ npy = "0.4"
 npy-derive = "0.4"
 structopt = "0.3.13"
 pbr = "1.0"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "my_benchmark"
+harness = false
