@@ -25,6 +25,11 @@ struct Cli {
     #[structopt(long)]
     multiplicative: bool,
 
+    /// Determines which algorithm to use. The "faster" option is optimized for
+    /// shorter paths.
+    #[structopt(long)]
+    faster: bool,
+
     /// The path to the file to read
     #[structopt(parse(from_os_str))]
     input_path: std::path::PathBuf,
@@ -53,19 +58,22 @@ fn main() {
         // eprintln!("{:?}", &edge);
         edges.push(edge);
     }
-
     println!("Loaded data");
-    println!("Looking for longest paths..");
-
 
     let num_to_extract: usize = (args.fraction * (edges.len() as f64)) as usize;
-    println!("Extracting {} edges", num_to_extract);
+    println!("Marking {} edges...", num_to_extract);
 
     let norm_group = match args.multiplicative {
         true => Multiplicative,
         false => Additive,
     };
-    let in_longest_path = mark_longest_paths_stepwise(&edges, num_to_extract, norm_group);
+
+    let in_longest_path = match args.faster {
+        false => mark_longest_paths_stepwise(&edges, num_to_extract, norm_group),
+        true => mark_longest_paths_faster(&edges, num_to_extract, norm_group),
+    };
+
+    println!("Saving output.. ");
 
     let output_as_ints = in_longest_path.iter().map(|&b| if b { 1} else {0});
 

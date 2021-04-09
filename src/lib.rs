@@ -1,4 +1,7 @@
 use std::cmp::min;
+use std::collections::{HashSet, BinaryHeap};
+use std::cmp::Reverse;
+use pbr::ProgressBar;
 
 #[derive(Debug, Clone)]
 pub struct Edge {
@@ -93,7 +96,7 @@ fn is_sorted(edges: &[Edge]) -> bool {
     true
 }
 
-fn argmax(values: &[Option<f32>]) -> usize {
+fn argmax(values: &[Option<f32>]) -> (usize, f32) {
     let mut largest_val = f32::NEG_INFINITY;
     let mut largest_idx: usize = 0;
     for (i, val) in values.iter().enumerate(){
@@ -104,7 +107,7 @@ fn argmax(values: &[Option<f32>]) -> usize {
             }
         }
     }
-    largest_idx
+    (largest_idx, largest_val)
 }
 
 
@@ -141,6 +144,189 @@ fn iterate_back_from<'a>(
     }
 }
 
+fn compute_node_distances(edges: &[Edge], norm_group: NormGroup) -> (Vec<Option<f32>>, Vec<Option<usize>>) {
+    let n: usize = edges.iter().map(|e| e.to).max().unwrap() + 1;
+
+    let mut node_dist: Vec<Option<f32>> = vec![None; n];
+    let mut node_incoming_edge_idx: Vec<Option<usize>> = vec![None; n];
+
+    // Compute node distances
+    for (i, e) in edges.iter().enumerate() {
+        let new_dist = compute_dist(node_dist[e.from], &e, norm_group);
+        let old_dist = node_dist[e.to];
+
+        if do_replace(old_dist, new_dist, norm_group)
+        {
+            node_dist[e.to] = Some(new_dist);
+            node_incoming_edge_idx[e.to] = Some(i);
+        }
+    }
+    (node_dist, node_incoming_edge_idx)
+}
+
+
+/// Mark//  edges that are in a longest_path. Continue until at least `num_to_mark`
+/// edges are marked. Once an edge has been marked, it is ignored for further
+/// computations of longest paths.
+pub fn mark_longest_paths_faster(edges: &[Edge], num_to_mark: usize, norm_group: NormGroup) -> Vec<bool> {
+    assert!(! edges.is_empty());
+    assert!(is_forward_pointing(edges));
+    assert!(is_sorted(edges));
+
+    let num_to_mark = min(num_to_mark, edges.len());
+    let mut num_marked: usize = 0;
+    let mut marked = vec![false; edges.len()];
+
+    // For each node, prepare a hashset containing all its incoming edges;
+    // Also, prepare a hashset containing all its outgoing edges.
+    let n: usize = edges.iter().map(|e| e.to).max().unwrap() + 1;
+    let mut node_all_incoming_edge_idxs: Vec<HashSet<usize>> = vec![HashSet::with_capacity(edges.len() / n); n];
+    let mut node_all_outgoing_edge_idxs: Vec<HashSet<usize>> = vec![HashSet::with_capacity(edges.len() / n); n];
+
+    let mut pb = ProgressBar::new(edges.len() as u64);
+    for (i, e) in edges.iter().enumerate() {
+        if let Some(node_incoming_edge_set) = node_all_incoming_edge_idxs.get_mut(e.to) {
+            node_incoming_edge_set.insert(i);
+        }
+        if let Some(node_outgoing_edge_set) = node_all_outgoing_edge_idxs.get_mut(e.from) {
+            node_outgoing_edge_set.insert(i);
+        }
+        pb.tick();
+    }
+    pb.finish_print("Finished preparing.");
+
+    let (node_dist, node_incoming_edge_idx) = compute_node_distances(edges, norm_group);
+    let mut node_dist: Vec<Option<f32>> = node_dist;
+    let mut node_incoming_edge_idx: Vec<Option<usize>> = node_incoming_edge_idx;
+
+    // Create progress bar
+    let mut pb = ProgressBar::new(num_to_mark as u64);
+
+    while num_marked < num_to_mark {
+        pb.set(num_marked as u64);
+        // Compute argmax of node_dist
+        let (largest_node_idx, _) = argmax(&node_dist);
+
+        // Walk backward from largest node to find all edges in longest path:
+        let mut path_marked_edges: Vec<usize> = Vec::with_capacity(n);
+        for (edge_idx, _) in iterate_back_from(edges, &node_incoming_edge_idx, largest_node_idx) {
+            path_marked_edges.push(edge_idx);
+        }
+
+        let num_marked_edges_in_path = path_marked_edges.len();
+        num_marked += num_marked_edges_in_path;
+
+        // Walk forward through path and
+        // - mark edges along the path
+        // - remove edges from hashsets
+        // - mark nodes along path for invalidation
+        let mut nodes_to_recalculate: BinaryHeap<Reverse<usize>> = BinaryHeap::with_capacity(n);
+        while let Some(edge_idx) = path_marked_edges.pop() {
+            // Mark edge
+            marked[edge_idx] = true;
+            let edge = &edges[edge_idx];
+            // print!("({0} -- {1} : {2:0.2}) ", edge.from, edge.to, edge.len);
+
+            // Remove edge as incoming edge from destination node:
+            let dest_node_idx = edge.to;
+            if let Some(node_incoming_edge_set) = node_all_incoming_edge_idxs.get_mut(dest_node_idx) {
+                node_incoming_edge_set.remove(&edge_idx);
+            }
+
+            // Remove edge as outgoing edge from source node:
+            let src_node_idx = edge.from;
+            if let Some(node_outgoing_edge_set) = node_all_outgoing_edge_idxs.get_mut(src_node_idx) {
+                node_outgoing_edge_set.remove(&edge_idx);
+            }
+
+            // Recalculate destination node's distance. This will be updated later.
+            nodes_to_recalculate.push(Reverse(dest_node_idx));
+        }
+
+        // Recalculate downstream nodes
+        while let Some(Reverse(dest_node_idx)) = nodes_to_recalculate.pop() {
+            // We are uing a min-heap, so at any point in time, node_idx is the
+            // smallest node that is in invalid state. Hence, after invalidating
+            // the current computed distance, we can recalculate it on the basis
+            // of the *valid* incoming edge and node values.
+            node_dist[dest_node_idx] = None;
+            node_incoming_edge_idx[dest_node_idx] = None;
+
+            // Recalculate node_distance
+            for &edge_idx in (&node_all_incoming_edge_idxs[dest_node_idx]).iter() {
+                let edge = &edges[edge_idx];
+                assert!(edge.to == dest_node_idx);
+                let src_node_idx = edge.from;
+                let current_dist = node_dist[dest_node_idx];
+                let new_dist = compute_dist(node_dist[src_node_idx], &edge, norm_group);
+
+                if do_replace(current_dist, new_dist, norm_group) {
+                    node_dist[dest_node_idx] = Some(new_dist);
+                    node_incoming_edge_idx[dest_node_idx] = Some(edge_idx);
+                }
+            }
+
+            // Mark downstream nodes from recalculation
+            for &edge_idx in (&node_all_outgoing_edge_idxs[dest_node_idx]).iter() {
+                // Recalculate downstream node if it is connected to current node.
+                let downstream_node_idx = edges[edge_idx].to;
+                if let Some(incoming_edge) = node_incoming_edge_idx[downstream_node_idx] {
+                    if edges[incoming_edge].from == dest_node_idx {
+                        nodes_to_recalculate.push(Reverse(downstream_node_idx));
+                    }
+                }
+            }
+        }
+        if num_marked_edges_in_path == 0 {
+            // All edges are 'negative' (either < 0 or < 1) and thus paths
+            // cannot be formed anymore. Proceed to individual pruning..
+            break;
+        }
+    }
+
+    // Continue with individual pruning
+    pb.message("Continuing with individual pruning!");
+    let mut norm_idx_pairs: Vec<_> = edges.iter()
+         .enumerate()
+         .filter_map(
+             |(i, edge)| if marked[i] {
+                 None
+             } else {
+                 Some((edge.len, i))
+             }
+         )
+        .collect();
+
+    norm_idx_pairs.sort_by(|(n1, _), (n2, _)| n1.partial_cmp(n2).unwrap());
+
+    for (_, i) in norm_idx_pairs.iter() {
+        pb.set(num_marked as u64);
+        if num_to_mark <= num_marked {
+            break;
+        }
+        marked[*i] = true;
+        num_marked += 1;
+    }
+    pb.finish_print("done");
+    marked
+}
+
+fn compute_dist(src_node_dist: Option<f32>, edge: &Edge, norm_group: NormGroup) -> f32 {
+    match norm_group {
+        Additive => src_node_dist.unwrap_or(0.0) + edge.len,
+        Multiplicative => src_node_dist.unwrap_or(1.0) * edge.len,
+    }
+}
+
+fn do_replace(current_dist: Option<f32>, proposed_dist: f32, norm_group: NormGroup) -> bool {
+    match current_dist {
+        None => match norm_group {
+            Additive => 0.0 <= proposed_dist,
+            Multiplicative => 1.0 <= proposed_dist,
+        }
+        Some(current_dist) => current_dist <= proposed_dist,
+    }
+}
 
 /// Mark edges that are in a longest_path. Continue until at least `num_to_mark`
 /// edges are marked. Once an edge has been marked, it is ignored for further
@@ -159,7 +345,7 @@ pub fn mark_longest_paths(edges: &[Edge], num_to_mark: usize, norm_group: NormGr
 
     while num_marked < num_to_mark {
         let mut node_dist: Vec<Option<f32>> = vec![None; n];
-        let mut node_pred_edge_idx: Vec<Option<usize>> = vec![None; n];
+        let mut node_incoming_edge_idx: Vec<Option<usize>> = vec![None; n];
 
         // Compute node distances
         for (i, e) in edges.iter().enumerate() {
@@ -182,20 +368,20 @@ pub fn mark_longest_paths(edges: &[Edge], num_to_mark: usize, norm_group: NormGr
             if replace
             {
                 node_dist[e.to] = Some(new_dist);
-                node_pred_edge_idx[e.to] = Some(i);
+                node_incoming_edge_idx[e.to] = Some(i);
             }
         }
         // Compute argmax of node_dist
-        let largest_node_idx = argmax(&node_dist);
+        let (largest_node_idx, _longest_path_len) = argmax(&node_dist);
 
         // Walk backward from largest node to find all edges in longest path:
         let mut path_length = 0;
-        for (edge_idx, _) in iterate_back_from(edges, &node_pred_edge_idx, largest_node_idx) {
+        for (edge_idx, edge) in iterate_back_from(edges, &node_incoming_edge_idx, largest_node_idx) {
             marked[edge_idx] = true;
+            dbg!(edge);
             path_length += 1;
         }
         num_marked += dbg!(path_length);
-        // num_marked += mark_path_from_node(largest_node_idx, &node_pred_edge_idx, &mut marked, edges);
     }
 
     marked
@@ -242,6 +428,52 @@ mod tests {
         assert_eq!(mark_longest_paths(&edges, 5, Additive), vec![true, true, true, true, true]);
     }
 
+#[test]
+    fn longest_paths_faster_works() {
+        use super::*;
+        let edges = vec![
+            Edge::new(0, 1, 1.0),
+            Edge::new(0, 1, 2.0),
+            Edge::new(0, 1, 3.0),
+            Edge::new(0, 2, 7.0),
+            Edge::new(1, 2, 3.0),
+        ];
+        assert_eq!(mark_longest_paths_faster(&edges, 1, Multiplicative), vec![false, false, true, false, true]);
+        assert_eq!(mark_longest_paths_faster(&edges, 2, Multiplicative), vec![false, false, true, false, true]);
+        assert_eq!(mark_longest_paths_faster(&edges, 3, Multiplicative), vec![false, false, true, true, true]);
+        assert_eq!(mark_longest_paths_faster(&edges, 4, Multiplicative), vec![false, true, true, true, true]);
+        assert_eq!(mark_longest_paths_faster(&edges, 5, Multiplicative), vec![true, true, true, true, true]);
+
+        assert_eq!(mark_longest_paths_faster(&edges, 1, Additive), vec![false, false, false, true, false]);
+        assert_eq!(mark_longest_paths_faster(&edges, 2, Additive), vec![false, false, true, true, true]);
+        assert_eq!(mark_longest_paths_faster(&edges, 3, Additive), vec![false, false, true, true, true]);
+        assert_eq!(mark_longest_paths_faster(&edges, 4, Additive), vec![false, true, true, true, true]);
+        assert_eq!(mark_longest_paths_faster(&edges, 5, Additive), vec![true, true, true, true, true]);
+
+        // Check that long chains are correctly handled:
+        // Full chain is worth 5 * 5 / 2 = 12.5
+        // sub-chains are worth as most 5.
+        let edges = vec![
+            Edge::new(0, 1, 5.0),
+            Edge::new(1, 2, 0.5),
+            Edge::new(2, 3, 5.0),
+        ];
+        assert_eq!(mark_longest_paths_faster(&edges, 1, Multiplicative), vec![true, true, true]);
+
+        // Check that node distances are also forward propagated
+        let edges = vec![
+            Edge::new(0, 1, 2.0),
+            Edge::new(1, 2, 0.5),
+            Edge::new(2, 3, 1.5),
+        ];
+        assert_eq!(mark_longest_paths_faster(&edges, 1, Multiplicative), vec![true, false, false]);
+        println!("\n\nTEST that FAILS");
+        println!("------------------------------------------------------------");
+        assert_eq!(mark_longest_paths_faster(&edges, 2, Multiplicative), vec![true, false, true]);
+        assert_eq!(mark_longest_paths_faster(&edges, 3, Multiplicative), vec![true, true, true]);
+
+    }
+
     #[test]
     fn longest_path_consistent() {
         use super::*;
@@ -255,7 +487,8 @@ mod tests {
 
         let a = mark_longest_paths(&edges, 20_000, Additive);
         let b = mark_longest_paths_stepwise(&edges, 20_000, Additive);
-
+        let c = mark_longest_paths_faster(&edges, 20_000, Additive);
         assert_eq!(a, b);
+        assert_eq!(a, c);
     }
 }
