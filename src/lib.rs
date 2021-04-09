@@ -3,6 +3,14 @@ use std::cmp::min;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
 
+
+///////////////////////////////////////////////////////////////////////////////
+//                              Data structures                              //
+///////////////////////////////////////////////////////////////////////////////
+
+
+/// Edge describes an edge from a node to another node with some weight or
+/// length. The length may be negative.
 #[derive(Debug, Clone)]
 pub struct Edge {
     pub from: usize,
@@ -16,6 +24,8 @@ impl Edge {
     }
 }
 
+/// An awkwardly named enum to describe whether edge weights should be added or
+/// multiplied when multiple edges are combined...
 #[derive(Debug, Clone, Copy)]
 pub enum NormGroup {
     Additive,
@@ -24,6 +34,51 @@ pub enum NormGroup {
 
 use NormGroup::*;
 
+
+///////////////////////////////////////////////////////////////////////////////
+//                                  Iterator                                 //
+///////////////////////////////////////////////////////////////////////////////
+
+// Implement an iterator to easily walk backwards over a directed path from a
+// starting node. It is only used twice, so probably overkill to define an
+// iterator for it...
+
+struct BackwardEdgeIterator<'a> {
+    edges: &'a [Edge],
+    incoming_edge_idx: &'a [Option<usize>],
+    node_idx: usize,
+}
+
+impl<'a> Iterator for BackwardEdgeIterator<'a> {
+    type Item = (usize, &'a Edge);
+
+    // The method that generates each item
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(incoming_edge_idx) = self.incoming_edge_idx[self.node_idx] {
+            let incoming_edge = &self.edges[incoming_edge_idx];
+            self.node_idx = incoming_edge.from;
+            Some((incoming_edge_idx, incoming_edge))
+        } else {
+            None
+        }
+    }
+}
+
+fn iterate_back_from<'a>(
+    edges: &'a [Edge],
+    incoming_edge_idx: &'a [Option<usize>],
+    node_idx: usize,
+) -> BackwardEdgeIterator<'a> {
+    BackwardEdgeIterator {
+        edges,
+        incoming_edge_idx,
+        node_idx,
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//                            Auxilliary functions                           //
+///////////////////////////////////////////////////////////////////////////////
 
 fn is_forward_pointing(edges: &[Edge]) -> bool {
     for e in edges.iter() {
@@ -63,39 +118,6 @@ fn argmax(values: &[Option<f32>]) -> (usize, f32) {
     (largest_idx, largest_val)
 }
 
-struct BackwardEdgeIterator<'a> {
-    edges: &'a [Edge],
-    incoming_edge_idx: &'a [Option<usize>],
-    node_idx: usize,
-}
-
-impl<'a> Iterator for BackwardEdgeIterator<'a> {
-    type Item = (usize, &'a Edge);
-
-    // The method that generates each item
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(incoming_edge_idx) = self.incoming_edge_idx[self.node_idx] {
-            let incoming_edge = &self.edges[incoming_edge_idx];
-            self.node_idx = incoming_edge.from;
-            Some((incoming_edge_idx, incoming_edge))
-        } else {
-            None
-        }
-    }
-}
-
-fn iterate_back_from<'a>(
-    edges: &'a [Edge],
-    incoming_edge_idx: &'a [Option<usize>],
-    node_idx: usize,
-) -> BackwardEdgeIterator<'a> {
-    BackwardEdgeIterator {
-        edges,
-        incoming_edge_idx,
-        node_idx,
-    }
-}
-
 fn compute_node_distances(
     edges: &[Edge],
     norm_group: NormGroup,
@@ -118,10 +140,106 @@ fn compute_node_distances(
     (node_dist, node_incoming_edge_idx)
 }
 
+
+fn compute_dist(src_node_dist: Option<f32>, edge: &Edge, norm_group: NormGroup) -> f32 {
+    match norm_group {
+        Additive => src_node_dist.unwrap_or(0.0) + edge.len,
+        Multiplicative => src_node_dist.unwrap_or(1.0) * edge.len,
+    }
+}
+
+/// Logic to determine whether an edge should be placed in a possible longest
+/// path. If the current distance is `None`, then the edge is accepted if it has
+/// positive weight (> 0.0 for additive, > 1.0 for multiplicative). Otherwise,
+/// the edge is accepted if it has greater weight than the existing one.
+fn do_replace(current_dist: Option<f32>, proposed_dist: f32, norm_group: NormGroup) -> bool {
+    match current_dist {
+        None => match norm_group {
+            Additive => 0.0 <= proposed_dist,
+            Multiplicative => 1.0 <= proposed_dist,
+        },
+        Some(current_dist) => current_dist <= proposed_dist,
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+//            Meat: mark edges that are part of some longest path            //
+///////////////////////////////////////////////////////////////////////////////
+
+
 /// Mark edges that are in a longest_path. Continue until at least `num_to_mark`
 /// edges are marked. Once an edge has been marked, it is ignored for further
 /// computations of longest paths.
-/// This function tries not to be quadratic in the number of edges.
+pub fn mark_longest_paths(edges: &[Edge], num_to_mark: usize, norm_group: NormGroup) -> Vec<bool> {
+    assert!(!edges.is_empty());
+    assert!(is_forward_pointing(edges));
+    assert!(is_sorted(edges));
+
+    let num_to_mark = min(num_to_mark, edges.len());
+    let mut num_marked: usize = 0;
+    let mut marked = vec![false; edges.len()];
+
+    // n - 1 is the index of the largest node
+    let n: usize = edges.iter().map(|e| e.to).max().unwrap() + 1;
+
+    while num_marked < num_to_mark {
+        let mut node_dist: Vec<Option<f32>> = vec![None; n];
+        let mut node_incoming_edge_idx: Vec<Option<usize>> = vec![None; n];
+
+        // Compute node distances
+        for (i, e) in edges.iter().enumerate() {
+            if marked[i] {
+                continue;
+            }
+
+            let new_dist = match norm_group {
+                Additive => node_dist[e.from].unwrap_or(0.0) + e.len,
+                Multiplicative => node_dist[e.from].unwrap_or(1.0) * e.len,
+            };
+
+            let old_dist = node_dist[e.to];
+
+            // Replace node distance if it is None or if new_dist is larger.
+            // BUG: If new_dist is negative (or < 1.0 for multiplicative), it
+            // replaces the existing `None` value. In the "faster" version, we
+            // use `do_replace`, which does not create negative links.
+            let replace = match old_dist {
+                None => true,
+                Some(old_dist) => old_dist <= new_dist,
+            };
+            if replace {
+                node_dist[e.to] = Some(new_dist);
+                node_incoming_edge_idx[e.to] = Some(i);
+            }
+        }
+        // Compute argmax of node_dist
+        let (largest_node_idx, _longest_path_len) = argmax(&node_dist);
+
+        // Walk backward from largest node to find all edges in longest path:
+        let mut path_length = 0;
+        for (edge_idx, _) in iterate_back_from(edges, &node_incoming_edge_idx, largest_node_idx)
+        {
+            marked[edge_idx] = true;
+            path_length += 1;
+        }
+        num_marked += path_length;
+    }
+
+    marked
+}
+
+
+/// Mark edges that are in a longest_path. Continue until at least `num_to_mark`
+/// edges are marked. Once an edge has been marked, it is ignored for further
+/// computations of longest paths.
+///
+/// The `mark_longest_paths` function is quadratic in the number of edges. This
+/// is a problem when it is applied to a network with 1-20 million edges. In
+/// `mark_longest_paths_faster`, we make use of the realization that in our use
+/// case the usual "longest path" consists of only 1-2 edges in the majority of
+/// cases. It therefore makes sense to do a lot of bookkeeping to not have to
+/// repeat the longest path algorithm from scratch.
 pub fn mark_longest_paths_faster(
     edges: &[Edge],
     num_to_mark: usize,
@@ -185,7 +303,6 @@ pub fn mark_longest_paths_faster(
             // Mark edge
             marked[edge_idx] = true;
             let edge = &edges[edge_idx];
-            // print!("({0} -- {1} : {2:0.2}) ", edge.from, edge.to, edge.len);
 
             // Remove edge as incoming edge from destination node:
             let dest_node_idx = edge.to;
@@ -268,80 +385,7 @@ pub fn mark_longest_paths_faster(
     marked
 }
 
-fn compute_dist(src_node_dist: Option<f32>, edge: &Edge, norm_group: NormGroup) -> f32 {
-    match norm_group {
-        Additive => src_node_dist.unwrap_or(0.0) + edge.len,
-        Multiplicative => src_node_dist.unwrap_or(1.0) * edge.len,
-    }
-}
 
-fn do_replace(current_dist: Option<f32>, proposed_dist: f32, norm_group: NormGroup) -> bool {
-    match current_dist {
-        None => match norm_group {
-            Additive => 0.0 <= proposed_dist,
-            Multiplicative => 1.0 <= proposed_dist,
-        },
-        Some(current_dist) => current_dist <= proposed_dist,
-    }
-}
-
-/// Mark edges that are in a longest_path. Continue until at least `num_to_mark`
-/// edges are marked. Once an edge has been marked, it is ignored for further
-/// computations of longest paths.
-pub fn mark_longest_paths(edges: &[Edge], num_to_mark: usize, norm_group: NormGroup) -> Vec<bool> {
-    assert!(!edges.is_empty());
-    assert!(is_forward_pointing(edges));
-    assert!(is_sorted(edges));
-
-    let num_to_mark = min(num_to_mark, edges.len());
-    let mut num_marked: usize = 0;
-    let mut marked = vec![false; edges.len()];
-
-    // n - 1 is the index of the largest node
-    let n: usize = edges.iter().map(|e| e.to).max().unwrap() + 1;
-
-    while num_marked < num_to_mark {
-        let mut node_dist: Vec<Option<f32>> = vec![None; n];
-        let mut node_incoming_edge_idx: Vec<Option<usize>> = vec![None; n];
-
-        // Compute node distances
-        for (i, e) in edges.iter().enumerate() {
-            if marked[i] {
-                continue;
-            }
-
-            let new_dist = match norm_group {
-                Additive => node_dist[e.from].unwrap_or(0.0) + e.len,
-                Multiplicative => node_dist[e.from].unwrap_or(1.0) * e.len,
-            };
-
-            let old_dist = node_dist[e.to];
-
-            // Replace node distance if it is None or if new_dist is larger.
-            let replace = match old_dist {
-                None => true,
-                Some(old_dist) => old_dist <= new_dist,
-            };
-            if replace {
-                node_dist[e.to] = Some(new_dist);
-                node_incoming_edge_idx[e.to] = Some(i);
-            }
-        }
-        // Compute argmax of node_dist
-        let (largest_node_idx, _longest_path_len) = argmax(&node_dist);
-
-        // Walk backward from largest node to find all edges in longest path:
-        let mut path_length = 0;
-        for (edge_idx, _) in iterate_back_from(edges, &node_incoming_edge_idx, largest_node_idx)
-        {
-            marked[edge_idx] = true;
-            path_length += 1;
-        }
-        num_marked += path_length;
-    }
-
-    marked
-}
 
 mod tests {
     #[test]
@@ -496,8 +540,6 @@ mod tests {
             mark_longest_paths_faster(&edges, 1, Multiplicative),
             vec![true, false, false]
         );
-        println!("\n\nTEST that FAILS");
-        println!("------------------------------------------------------------");
         assert_eq!(
             mark_longest_paths_faster(&edges, 2, Multiplicative),
             vec![true, false, true]
