@@ -1,4 +1,5 @@
 use n_longest_paths::*;
+use n_longest_paths::NormGroup::*;
 use structopt::StructOpt;
 use std::io::Read;
 use npy::NpyData;
@@ -17,8 +18,13 @@ pub struct NPEdge {
 /// Search for a pattern in a file and display the lines that contain it.
 #[derive(StructOpt, Debug)]
 struct Cli {
-    // The fraction  of edges to find as part of some longest path
+    /// The fraction  of edges to find as part of some longest path
     fraction: f64,
+
+    /// Determines whether edge weights are multiplied or summed
+    #[structopt(long)]
+    multiplicative: bool,
+
     /// The path to the file to read
     #[structopt(parse(from_os_str))]
     input_path: std::path::PathBuf,
@@ -54,7 +60,12 @@ fn main() {
 
     let num_to_extract: usize = (args.fraction * (edges.len() as f64)) as usize;
     println!("Extracting {} edges", num_to_extract);
-    let in_longest_path = longest_paths_log(&edges, num_to_extract);
+
+    let norm_group = match args.multiplicative {
+        true => Multiplicative,
+        false => Additive,
+    };
+    let in_longest_path = mark_longest_paths_stepwise(&edges, num_to_extract, norm_group);
 
     let output_as_ints = in_longest_path.iter().map(|&b| if b { 1} else {0});
 
