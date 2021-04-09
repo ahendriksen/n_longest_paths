@@ -85,7 +85,7 @@ pub fn longest_paths(edges: &[Edge], extract_num: usize) -> Vec<bool> {
     let n: usize = edges.iter().map(|e| e.to).max().unwrap() + 1;
 
     while num_extracted < extract_num {
-        let mut node_dist: Vec<f32> = vec![0.0; n];
+        let mut node_dist: Vec<Option<f32>> = vec![None; n];
         let mut node_pred_edge_idx: Vec<Option<usize>> = vec![None; n];
 
         // Compute node distances
@@ -93,9 +93,16 @@ pub fn longest_paths(edges: &[Edge], extract_num: usize) -> Vec<bool> {
             if in_longest_path[i] {
                 continue;
             }
-            let new_dist = node_dist[e.from] + e.len;
-            if new_dist > node_dist[e.to] {
-                node_dist[e.to] = new_dist;
+            let new_dist = node_dist[e.from].unwrap_or(0.0) + e.len;
+            let old_dist = node_dist[e.to];
+
+            let replace = match old_dist {
+                Some(old_dist) => old_dist <= new_dist ,
+                None => true,
+            };
+            if replace
+            {
+                node_dist[e.to] = Some(new_dist);
                 node_pred_edge_idx[e.to] = Some(i);
             }
         }
@@ -103,14 +110,15 @@ pub fn longest_paths(edges: &[Edge], extract_num: usize) -> Vec<bool> {
         let mut largest_dist = f32::NEG_INFINITY;
         let mut largest_node: usize = 0;
         for (i, dist) in node_dist.iter().enumerate(){
-            if dist > &largest_dist {
-                largest_dist = *dist;
-                largest_node = i;
+            if let Some(d) = dist {
+                if &largest_dist <= d {
+                    largest_dist = *d;
+                    largest_node = i;
+                }
             }
         }
 
         // Walk backward from largest node to find all edges in longest path:
-        // let mut cur_node = dbg!(largest_node);
         let mut cur_node = largest_node;
         loop {
             if let Some(pred_edge_idx) = node_pred_edge_idx[cur_node] {
@@ -118,7 +126,6 @@ pub fn longest_paths(edges: &[Edge], extract_num: usize) -> Vec<bool> {
                 // Indicate that edge was part of longest_path
                 in_longest_path[pred_edge_idx] = true;
                 num_extracted += 1;
-                // dbg!(num_extracted);
 
                 // Walk path:
                 cur_node = pred_edge.from;
