@@ -13,7 +13,9 @@ impl Edge {
     }
 }
 
+/// Run longest_paths in steps and clean up used edges in between.
 pub fn longest_paths_log(edges: &[Edge], num_to_extract: usize) -> Vec<bool> {
+    const MIN_STEP_SIZE:usize = 1000;
 
     let num_to_extract = min(num_to_extract, edges.len());
 
@@ -25,7 +27,7 @@ pub fn longest_paths_log(edges: &[Edge], num_to_extract: usize) -> Vec<bool> {
 
     while num_extracted < total_num_extract {
         let mut num_to_extract = total_num_extract - num_extracted;
-        if num_to_extract > 1000 {
+        if MIN_STEP_SIZE < num_to_extract {
             num_to_extract = num_to_extract / 2;
         }
         let extracted_edges = longest_paths(&shortened_edges, num_to_extract);
@@ -98,7 +100,7 @@ pub fn longest_paths(edges: &[Edge], extract_num: usize) -> Vec<bool> {
             }
         }
         // Compute argmax of node_dist
-        let mut largest_dist = 0.0;
+        let mut largest_dist = f32::NEG_INFINITY;
         let mut largest_node: usize = 0;
         for (i, dist) in node_dist.iter().enumerate(){
             if dist > &largest_dist {
