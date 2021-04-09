@@ -128,3 +128,38 @@ pub fn longest_paths(edges: &[Edge], extract_num: usize) -> Vec<bool> {
 
     in_longest_path
 }
+
+
+mod tests {
+    #[test]
+    fn longest_paths_works() {
+        use super::*;
+        let edges = vec![
+            Edge::new(0, 1, 0.1),
+            Edge::new(0, 1, 1.1),
+            Edge::new(0, 1, 0.5),
+            Edge::new(0, 2, 5.0),
+            Edge::new(1, 2, 1.0),
+        ];
+        assert_eq!(longest_paths(&edges, 1), vec![false, false, false, true, false]);
+        assert_eq!(longest_paths(&edges, 3), vec![false, true, false, true, true]);
+        assert_eq!(longest_paths(&edges, 4), vec![false, true, true, true, true]);
+    }
+
+    #[test]
+    fn longest_path_consistent() {
+        use super::*;
+        let n = 256;
+        let mut edges: Vec<Edge> = Vec::with_capacity(n * n);
+        for i in 0..n {
+            for j in (i+1)..n {
+                edges.push(Edge::new(i, j, (i + j) as f32));
+            }
+        }
+
+        let a = longest_paths(&edges, 20_000);
+        let b = longest_paths_log(&edges, 20_000);
+
+        assert_eq!(a, b);
+    }
+}
