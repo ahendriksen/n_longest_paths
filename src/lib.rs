@@ -405,7 +405,8 @@ pub fn mark_longest_paths_faster(
         .filter_map(|(i, edge)| if marked[i] { None } else { Some((edge.len, i)) })
         .collect();
 
-    norm_idx_pairs.sort_by(|(n1, _), (n2, _)| n1.partial_cmp(n2).unwrap());
+    // Sort from largest to smallest (hence `reverse`)
+    norm_idx_pairs.sort_by(|(n1, _), (n2, _)| n1.partial_cmp(n2).unwrap().reverse());
 
     for (_, i) in norm_idx_pairs.iter() {
         pb.set(num_marked as u64);
