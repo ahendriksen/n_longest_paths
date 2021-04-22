@@ -3,6 +3,40 @@ use std::cmp::min;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
 
+use pyo3::prelude::*;
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArrayDyn};
+
+/// A Python module implemented in Rust.
+#[pymodule]
+fn n_longest_paths(_py: Python, m: &PyModule) -> PyResult<()> {
+    // wrapper of `mark_longest_paths_faster`
+    #[pyfn(m, "mark_longest_paths")]
+    fn mark_longest_paths_py<'py>(
+        py: Python<'py>,
+        from: PyReadonlyArrayDyn<usize>,
+        to: PyReadonlyArrayDyn<usize>,
+        len: PyReadonlyArrayDyn<f32>,
+        num_to_mark: usize,
+    ) -> &'py PyArray1<bool> {
+        let from = from.as_array();
+        let to = to.as_array();
+        let len = len.as_array();
+
+        let mut edges: Vec<Edge> = Vec::with_capacity(from.len());
+
+        for i in 0..from.len() {
+            edges.push(
+                Edge::new(from[i], to[i], len[i])
+            );
+        }
+
+        let marked = mark_longest_paths_faster(&edges, num_to_mark, Multiplicative);
+
+        marked.into_pyarray(py)
+    }
+
+    Ok(())
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 //                              Data structures                              //
