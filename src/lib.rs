@@ -5,7 +5,7 @@ pub mod python_bindings;
 
 pub use edge::Edge;
 pub use norm_group::NormGroup;
-pub use fast_graph::fast_graph_mark_longest_paths;
+pub use fast_graph::{FastGraph, fast_graph_mark_longest_paths};
 
 use NormGroup::*;
 use fast_graph::{is_forward_pointing, is_sorted, argmax};
@@ -135,22 +135,10 @@ pub fn mark_longest_paths(edges: &[Edge], num_to_mark: usize, norm_group: NormGr
                 continue;
             }
 
-            let new_dist = match norm_group {
-                Additive => node_dist[e.from].unwrap_or(0.0) + e.len,
-                Multiplicative => node_dist[e.from].unwrap_or(1.0) * e.len,
-            };
-
+            let new_dist = norm_group.compute_dist(node_dist[e.from], e);
             let old_dist = node_dist[e.to];
 
-            // Replace node distance if it is None or if new_dist is larger.
-            // BUG: If new_dist is negative (or < 1.0 for multiplicative), it
-            // replaces the existing `None` value. In the "faster" version, we
-            // use `do_replace`, which does not create negative links.
-            let replace = match old_dist {
-                None => true,
-                Some(old_dist) => old_dist <= new_dist,
-            };
-            if replace {
+            if norm_group.do_replace(old_dist, new_dist) {
                 node_dist[e.to] = Some(new_dist);
                 node_incoming_edge_idx[e.to] = Some(i);
             }

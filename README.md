@@ -49,23 +49,27 @@ from n_longest_paths import fast_graph_mark_longest_paths
 def wrap_mark_longest_paths(src, dest, length, num_to_mark):
     return mark_longest_paths(src.astype(np.uint64), dest.astype(np.uint64), length.astype(np.float32), num_to_mark)
 
-def wrap_fgmlp(src, dest, length, num_to_mark, length_type="additive"):
+def wrap_skippable(src, dest, length, num_to_mark, length_type="additive", skippable=None):
+    if skippable is not None: 
+        skippable = skippable.astype(bool)
     return fast_graph_mark_longest_paths(
         src.astype(np.uint64), 
         dest.astype(np.uint64), 
         length.astype(np.float32), 
         num_to_mark, 
         length_type,
+        skippable,
     )
 
 src = np.array([0, 0, 0])
 dest = np.array([1, 1, 1])
-length = np.array([1.1, 1.2, 1.3])  
+length = np.array([1.1, 1.2, 1.3])
+skippable = np.array([False, False, True])  
 wrap_mark_longest_paths(src, dest, length, 1)
 
-wrap_fgmlp(src, dest, length, 1, "additive")
+wrap_skippable(src, dest, length, 1, "additive", skippable)
 ```
 
-The result should be `array([False, False, True])`: the longest path from node
-`0` to node `1` was marked as the longest path.
+The result should be `array([False, True, False])`: the longest nong-skippable
+path from node `0` to node `1` was marked as the longest path.
 

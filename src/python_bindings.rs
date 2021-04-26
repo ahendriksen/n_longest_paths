@@ -1,7 +1,7 @@
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArrayDyn};
 use pyo3::prelude::*;
 use pyo3::exceptions::PyTypeError;
-use crate::{Edge, NormGroup::*, mark_longest_paths_faster, fast_graph_mark_longest_paths};
+use crate::{FastGraph, Edge, NormGroup::*, mark_longest_paths_faster};
 
 /// A Python module implemented in Rust.
 #[pymodule]
@@ -31,7 +31,7 @@ fn n_longest_paths(_py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m, "fast_graph_mark_longest_paths")]
-    #[text_signature = "(src, dest, lengths, num_to_mark, length_type, /)"]
+    #[text_signature = "(src, dest, lengths, num_to_mark, length_type, skippable=None, /)"]
     fn fast_graph_mark_longest_paths_py<'py>(
         py: Python<'py>,
         src: PyReadonlyArrayDyn<usize>,
@@ -39,10 +39,12 @@ fn n_longest_paths(_py: Python, m: &PyModule) -> PyResult<()> {
         lengths: PyReadonlyArrayDyn<f32>,
         num_to_mark: usize,
         length_type : &str,
+        skippable: Option<PyReadonlyArrayDyn<bool>>,
     ) -> PyResult<&'py PyArray1<bool>> {
         let from = src.as_array();
         let to = dest.as_array();
         let len = lengths.as_array();
+
 
         let mut edges: Vec<Edge> = Vec::with_capacity(from.len());
 
@@ -56,7 +58,18 @@ fn n_longest_paths(_py: Python, m: &PyModule) -> PyResult<()> {
             _ => Err(PyTypeError::new_err("Expected `length_type` to equal 'multiplicative' or 'additive'.")),
         }?;
 
-        let marked = fast_graph_mark_longest_paths(norm_group, edges, num_to_mark);
+        let mut graph = FastGraph::new(edges, norm_group);
+
+        if let Some(skippable) = skippable {
+            let skippable: Vec<bool> = skippable
+                .as_array()
+                .into_iter()
+                .map(|&s| s)
+                .collect();
+            graph.set_skippable(&skippable);
+        }
+
+        let marked = graph.mark_longest_paths(num_to_mark);
 
         Ok(marked.into_pyarray(py))
     }

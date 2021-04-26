@@ -52,8 +52,9 @@ pub fn argmax(values: &[Option<f32>]) -> (usize, f32) {
 pub struct FastGraph {
     norm_group: NormGroup,
     edges: Vec<Edge>,
+    // Skippable edges that cannot be marked:
+    skippable: Vec<bool>,
     marked: Vec<bool>,
-    // TODO: Add skippable edges that cannot be marked.
 
     num_nodes: usize,
     num_marked: usize,
@@ -76,7 +77,7 @@ impl FastGraph {
         assert!(is_forward_pointing(&edges));
         assert!(is_sorted(&edges));
 
-
+        let skippable = vec![false; edges.len()];
         let num_marked: usize = 0;
         let marked = vec![false; edges.len()];
 
@@ -103,6 +104,7 @@ impl FastGraph {
         FastGraph {
             norm_group,
             edges,
+            skippable,
             marked,
             num_nodes: n,
             num_marked,
@@ -112,6 +114,13 @@ impl FastGraph {
             node_max_incoming_edge_idx,
         }
     }
+
+    pub fn set_skippable(&mut self, skippable: &[bool]) {
+        assert!(self.edges.len() == skippable.len());
+
+        self.skippable = Vec::from(skippable);
+    }
+
 
     fn compute_node_distances(
         norm_group: NormGroup,
@@ -150,13 +159,18 @@ impl FastGraph {
         path_edge_idxs
     }
 
-    fn mark_edges(&mut self, edge_idxs: &[usize]) {
+    fn mark_edges(&mut self, edge_idxs: &[usize]) -> usize {
         let mut nodes_to_recalculate : MinHeap<usize> = MinHeap::with_capacity(self.num_nodes);
+
+        let mut num_marked: usize = 0;
 
         // Mark edges, but note that the maximal distance of the destination
         // node of each edge has to be recalculated.
         for &edge_idx in edge_idxs.iter() {
-            self.mark_single_edge(edge_idx);
+            let is_marked = self.mark_single_edge(edge_idx);
+            if is_marked {
+                num_marked += 1;
+            }
             let edge = &self.edges[edge_idx];
             nodes_to_recalculate.push(Reverse(edge.to));
         }
@@ -197,11 +211,18 @@ impl FastGraph {
                 }
             }
         }
+
+        num_marked
     }
 
     //// Mark a single edge and update graph connectivity
     //// NOTE: does *not* update node distances.
-    fn mark_single_edge(&mut self, edge_idx: usize) {
+    //// Returns true if edge was marked, else false (if edge was skippable).
+    fn mark_single_edge(&mut self, edge_idx: usize) -> bool {
+        if self.skippable[edge_idx] {
+            return false;
+        }
+
         // Mark edge
         self.marked[edge_idx] = true;
         self.num_marked += 1;
@@ -222,6 +243,7 @@ impl FastGraph {
         {
             node_outgoing_edge_set.remove(&edge_idx);
         }
+        true
     }
     // fn update_longest_path(&mut self) {
     //     let n = self.num_nodes;
@@ -286,10 +308,10 @@ impl FastGraph {
             // Get longest path
             let longest_path_edge_idxs = self.get_longest_path_edge_idxs();
             // Mark edges in longest path
-            self.mark_edges(&longest_path_edge_idxs);
+            let path_num_marked = self.mark_edges(&longest_path_edge_idxs);
 
             // Break if we can't find paths anymore
-            if longest_path_edge_idxs.len() == 0 {
+            if path_num_marked == 0 {
                 // All edges are 'negative' (either < 0 or < 1) and thus paths
                 // cannot be formed anymore. Proceed to individual pruning..
                 break;
@@ -312,8 +334,7 @@ impl FastGraph {
             if num_to_mark <= self.num_marked {
                 break;
             }
-            self.marked[*edge_idx] = true;
-            self.num_marked += 1;
+            self.mark_single_edge(*edge_idx);
         }
         pb.finish_print("done");
 
@@ -355,7 +376,29 @@ mod tests {
     }
 
     #[test]
-    fn longest_paths_mult_works() {
+    fn fast_graph_skippable_works() {
+        use super::*;
+        use crate::norm_group::NormGroup;
+
+        let edges = vec![
+            Edge::new(0, 1, 1.1),
+            Edge::new(0, 1, 1.2),
+            Edge::new(0, 1, 1.3),
+        ];
+
+        let skippable = vec![false, false, true];
+
+        let mut graph = FastGraph::new(edges.clone(), NormGroup::Multiplicative);
+        graph.set_skippable(&skippable);
+
+        assert_eq!(
+            graph.mark_longest_paths(1),
+            vec![false, true, false]
+        );
+    }
+
+    #[test]
+    fn fast_graph_mult_works() {
         use super::*;
         let edges = vec![
             Edge::new(0, 1, 1.0),
