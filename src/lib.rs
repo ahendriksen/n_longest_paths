@@ -1,72 +1,21 @@
+pub mod edge;
+pub mod norm_group;
+pub mod fast_graph;
+pub mod python_bindings;
+
+pub use edge::Edge;
+pub use norm_group::NormGroup;
+pub use fast_graph::fast_graph_mark_longest_paths;
+
+use NormGroup::*;
+use fast_graph::{is_forward_pointing, is_sorted, argmax};
 use pbr::ProgressBar;
 use std::cmp::min;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
 
-use pyo3::prelude::*;
-use numpy::{IntoPyArray, PyArray1, PyReadonlyArrayDyn};
+type MinHeap<T> = BinaryHeap<Reverse<T>>;
 
-/// A Python module implemented in Rust.
-#[pymodule]
-fn n_longest_paths(_py: Python, m: &PyModule) -> PyResult<()> {
-    // wrapper of `mark_longest_paths_faster`
-    #[pyfn(m, "mark_longest_paths")]
-    fn mark_longest_paths_py<'py>(
-        py: Python<'py>,
-        from: PyReadonlyArrayDyn<usize>,
-        to: PyReadonlyArrayDyn<usize>,
-        len: PyReadonlyArrayDyn<f32>,
-        num_to_mark: usize,
-    ) -> &'py PyArray1<bool> {
-        let from = from.as_array();
-        let to = to.as_array();
-        let len = len.as_array();
-
-        let mut edges: Vec<Edge> = Vec::with_capacity(from.len());
-
-        for i in 0..from.len() {
-            edges.push(
-                Edge::new(from[i], to[i], len[i])
-            );
-        }
-
-        let marked = mark_longest_paths_faster(&edges, num_to_mark, Multiplicative);
-
-        marked.into_pyarray(py)
-    }
-
-    Ok(())
-}
-
-///////////////////////////////////////////////////////////////////////////////
-//                              Data structures                              //
-///////////////////////////////////////////////////////////////////////////////
-
-
-/// Edge describes an edge from a node to another node with some weight or
-/// length. The length may be negative.
-#[derive(Debug, Clone)]
-pub struct Edge {
-    pub from: usize,
-    pub to: usize,
-    pub len: f32,
-}
-
-impl Edge {
-    pub fn new(from: usize, to: usize, len: f32) -> Edge {
-        Edge { from, to, len }
-    }
-}
-
-/// An awkwardly named enum to describe whether edge weights should be added or
-/// multiplied when multiple edges are combined...
-#[derive(Debug, Clone, Copy)]
-pub enum NormGroup {
-    Additive,
-    Multiplicative,
-}
-
-use NormGroup::*;
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -114,44 +63,6 @@ fn iterate_back_from<'a>(
 //                            Auxilliary functions                           //
 ///////////////////////////////////////////////////////////////////////////////
 
-fn is_forward_pointing(edges: &[Edge]) -> bool {
-    for e in edges.iter() {
-        if e.to <= e.from {
-            return false;
-        }
-    }
-    true
-}
-
-fn is_sorted(edges: &[Edge]) -> bool {
-    for i in 1..edges.len() {
-        let e0 = &edges[i - 1];
-        let e1 = &edges[i];
-
-        let e0 = (e0.from, e0.to);
-        let e1 = (e1.from, e1.to);
-
-        if e1 < e0 {
-            return false;
-        }
-    }
-    true
-}
-
-fn argmax(values: &[Option<f32>]) -> (usize, f32) {
-    let mut largest_val = f32::NEG_INFINITY;
-    let mut largest_idx: usize = 0;
-    for (i, val) in values.iter().enumerate() {
-        if let Some(val) = val {
-            if &largest_val <= val {
-                largest_val = *val;
-                largest_idx = i;
-            }
-        }
-    }
-    (largest_idx, largest_val)
-}
-
 fn compute_node_distances(
     edges: &[Edge],
     norm_group: NormGroup,
@@ -174,7 +85,6 @@ fn compute_node_distances(
     (node_dist, node_incoming_edge_idx)
 }
 
-
 fn compute_dist(src_node_dist: Option<f32>, edge: &Edge, norm_group: NormGroup) -> f32 {
     match norm_group {
         Additive => src_node_dist.unwrap_or(0.0) + edge.len,
@@ -196,11 +106,9 @@ fn do_replace(current_dist: Option<f32>, proposed_dist: f32, norm_group: NormGro
     }
 }
 
-
 ///////////////////////////////////////////////////////////////////////////////
 //            Meat: mark edges that are part of some longest path            //
 ///////////////////////////////////////////////////////////////////////////////
-
 
 /// Mark edges that are in a longest_path. Continue until at least `num_to_mark`
 /// edges are marked. Once an edge has been marked, it is ignored for further
@@ -252,8 +160,7 @@ pub fn mark_longest_paths(edges: &[Edge], num_to_mark: usize, norm_group: NormGr
 
         // Walk backward from largest node to find all edges in longest path:
         let mut path_length = 0;
-        for (edge_idx, _) in iterate_back_from(edges, &node_incoming_edge_idx, largest_node_idx)
-        {
+        for (edge_idx, _) in iterate_back_from(edges, &node_incoming_edge_idx, largest_node_idx) {
             marked[edge_idx] = true;
             path_length += 1;
         }
@@ -332,7 +239,7 @@ pub fn mark_longest_paths_faster(
         // - mark edges along the path
         // - remove edges from hashsets
         // - mark nodes along path for invalidation
-        let mut nodes_to_recalculate: BinaryHeap<Reverse<usize>> = BinaryHeap::with_capacity(n);
+        let mut nodes_to_recalculate: MinHeap<usize> = MinHeap::with_capacity(n);
         while let Some(edge_idx) = path_marked_edges.pop() {
             // Mark edge
             marked[edge_idx] = true;
@@ -419,8 +326,6 @@ pub fn mark_longest_paths_faster(
     pb.finish_print("done");
     marked
 }
-
-
 
 mod tests {
     #[test]
@@ -586,6 +491,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]                   // This test is slow..
     fn longest_path_consistent() {
         use super::*;
         let n = 64;

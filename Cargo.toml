@@ -18,7 +18,7 @@ structopt = "0.3.13"
 pbr = "1.0"
 ndarray = "0.14"
 numpy = "0.13"
-# rust-numpy = "0.13"
+
 
 [dependencies.pyo3]
 version = "0.13.2"

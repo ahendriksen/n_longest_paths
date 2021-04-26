@@ -1,4 +1,5 @@
 use n_longest_paths::NormGroup::*;
+
 use n_longest_paths::*;
 use npy;
 use npy::NpyData;

@@ -44,14 +44,26 @@ Then start a python session and run:
 ``` python
 import numpy as np
 from n_longest_paths import mark_longest_paths
+from n_longest_paths import fast_graph_mark_longest_paths
 
 def wrap_mark_longest_paths(src, dest, length, num_to_mark):
     return mark_longest_paths(src.astype(np.uint64), dest.astype(np.uint64), length.astype(np.float32), num_to_mark)
+
+def wrap_fgmlp(src, dest, length, num_to_mark, length_type="additive"):
+    return fast_graph_mark_longest_paths(
+        src.astype(np.uint64), 
+        dest.astype(np.uint64), 
+        length.astype(np.float32), 
+        num_to_mark, 
+        length_type,
+    )
 
 src = np.array([0, 0, 0])
 dest = np.array([1, 1, 1])
 length = np.array([1.1, 1.2, 1.3])  
 wrap_mark_longest_paths(src, dest, length, 1)
+
+wrap_fgmlp(src, dest, length, 1, "additive")
 ```
 
 The result should be `array([False, False, True])`: the longest path from node

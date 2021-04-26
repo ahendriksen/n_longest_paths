@@ -1,7 +1,6 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use n_longest_paths::*;
 
-
 pub fn bm_longest_paths(c: &mut Criterion) {
     let mut group = c.benchmark_group("longest_paths");
 
@@ -9,7 +8,7 @@ pub fn bm_longest_paths(c: &mut Criterion) {
         for &step in [1, 2, 4, 8].iter() {
             let mut edges: Vec<Edge> = Vec::with_capacity(n * n);
             for i in 0..*n {
-                for j in ((i+1)..*n).step_by(step) {
+                for j in ((i + 1)..*n).step_by(step) {
                     edges.push(Edge::new(i, j, (i + j) as f32));
                 }
             }
@@ -19,14 +18,26 @@ pub fn bm_longest_paths(c: &mut Criterion) {
             }
 
             group.bench_with_input(
-                BenchmarkId::new(format!("mark_longest_paths step skip {}", step), edges.len()),
+                BenchmarkId::new(
+                    format!("mark_longest_paths step skip {}", step),
+                    edges.len(),
+                ),
                 &n,
-                |b, &_n| b.iter(|| mark_longest_paths(&edges, edges.len() * 10 / 9, NormGroup::Additive))
+                |b, &_n| {
+                    b.iter(|| mark_longest_paths(&edges, edges.len() * 10 / 9, NormGroup::Additive))
+                },
             );
             group.bench_with_input(
-                BenchmarkId::new(format!("mark_longest_paths_faster step skip {}", step), edges.len()),
+                BenchmarkId::new(
+                    format!("mark_longest_paths_faster step skip {}", step),
+                    edges.len(),
+                ),
                 &n,
-                |b, &_n| b.iter(|| mark_longest_paths_faster(&edges, edges.len() * 10 / 9, NormGroup::Additive))
+                |b, &_n| {
+                    b.iter(|| {
+                        mark_longest_paths_faster(&edges, edges.len() * 10 / 9, NormGroup::Additive)
+                    })
+                },
             );
         }
     }
